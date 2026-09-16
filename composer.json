@@ -2,7 +2,6 @@
     "name": "cloudme/notify-php",
     "description": "Official framework-independent PHP SDK for the Notify multi-channel notification API (SMS, Telegram, WhatsApp, Voice, Email, Push).",
     "type": "library",
-    "version": "1.0.0",
     "license": "MIT",
     "keywords": ["notify", "sms", "telegram", "whatsapp", "push", "email", "voice", "notifications", "api"],
     "require": {
