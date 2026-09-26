@@ -12,10 +12,14 @@ use CloudMe\Notify\Channels\ChannelSender;
 use CloudMe\Notify\Channels\PushChannelSender;
 use CloudMe\Notify\Exceptions\AuthenticationException;
 use CloudMe\Notify\Exceptions\ConfigurationException;
+use CloudMe\Notify\Exceptions\ValidationException;
 use CloudMe\Notify\Http\HttpClient;
+use CloudMe\Notify\Otp\OtpClient;
 use CloudMe\Notify\Reports\ReportsClient;
 use CloudMe\Notify\Responses\BalanceResponse;
 use CloudMe\Notify\Responses\MessageStatusResponse;
+use CloudMe\Notify\Responses\OtpSendResponse;
+use CloudMe\Notify\Responses\OtpVerifyResponse;
 use CloudMe\Notify\Responses\SendMessageResponse;
 use DateTimeInterface;
 use GuzzleHttp\Client as GuzzleClient;
@@ -32,6 +36,9 @@ use GuzzleHttp\Client as GuzzleClient;
  * );
  *
  * $notify->sms()->send(to: '+998901234567', message: 'Buyurtmangiz tayyor');
+ *
+ * $otp = $notify->otp()->send(to: '+998901234567');
+ * $notify->otp()->verify($otp->otpId, '481201')->verified;
  * ```
  *
  * Authentication, token refresh, request signing, nonce/timestamp
@@ -150,6 +157,11 @@ final class NotifyClient
         return new ReportsClient($this);
     }
 
+    public function otp(): OtpClient
+    {
+        return new OtpClient($this);
+    }
+
     /**
      * @internal called by ChannelSender - use `$notify->sms()->send(...)` etc. instead
      *
@@ -200,6 +212,46 @@ final class NotifyClient
             'phone' => $phone,
             'fcm_token' => $fcmToken,
         ], retryable: true);
+    }
+
+    /**
+     * @internal called by OtpClient - use `$notify->otp()->send(...)` instead
+     */
+    public function sendOtp(string $to, string $channel): OtpSendResponse
+    {
+        // Never retried: the endpoint has no idempotency, so a retry after a
+        // lost response would generate and deliver a second code (or hit the
+        // resend cooldown). Let the caller decide.
+        $response = $this->authenticatedRequest('POST', 'otp/send', json: [
+            'to' => $to,
+            'channel' => $channel,
+        ]);
+
+        return OtpSendResponse::fromArray($response);
+    }
+
+    /**
+     * @internal called by OtpClient - use `$notify->otp()->verify(...)` instead
+     */
+    public function verifyOtp(string $otpId, string $code): OtpVerifyResponse
+    {
+        try {
+            // Not retried either - every call can count as an attempt.
+            $response = $this->authenticatedRequest('POST', 'otp/verify', json: [
+                'otp_id' => $otpId,
+                'code' => $code,
+            ]);
+        } catch (ValidationException $e) {
+            // A wrong/expired/burnt code is an expected outcome, returned as
+            // a result rather than thrown; a malformed request still throws.
+            if (str_starts_with((string) $e->errorCode, 'OTP_')) {
+                return OtpVerifyResponse::fromArray($e->responseBody ?? []);
+            }
+
+            throw $e;
+        }
+
+        return OtpVerifyResponse::fromArray($response);
     }
 
     /**

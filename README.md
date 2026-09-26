@@ -113,6 +113,50 @@ $response->balance;     // "999880.00"
 $response->environment; // "production" or "sandbox"
 ```
 
+### Moderation of free-text messages
+
+A message sent **with a template** (`templateId`) goes out immediately. Plain text (`message:`) is checked against the platform's system templates and your company's own templates — if it matches one of them (the `{{variables}}` may hold any value), it goes out immediately too. Text that matches **no** template is held until a Notify moderator approves it:
+
+```php
+$response = $notify->sms()->send(to: '+998901234567', message: 'Summer sale -50%!');
+
+$response->isHeldForModeration(); // true -> status "moderation", already charged
+```
+
+Once reviewed it moves on to `queued` (approved) or `rejected` (refused, refunded — you also get a `message.rejected` webhook). Check it later with `$notify->message($id)->isRejected()`. A moderator can turn an approved text into a template for your company, so the same kind of text is not held again. For anything time-sensitive — in particular one-time codes — use a template or the [OTP API](#one-time-codes-otp).
+
+## One-time codes (OTP)
+
+The platform generates the code, delivers it and checks it — your application never sees or stores the code. Code length, validity and allowed attempts come from your company's OTP settings in the Notify cabinet, or the platform defaults set by the Notify administrator when you have not set your own. OTP messages are billed like normal messages and are never held for moderation.
+
+```php
+// 1. Send - keep $otp->otpId (e.g. in the user's session)
+$otp = $notify->otp()->send(to: '+998901234567');            // channel: 'sms' (default), 'telegram', 'whatsapp' or 'email'
+
+$otp->otpId;       // "0f6c1a52-..."
+$otp->codeLength;  // 6
+$otp->expiresIn;   // 300 (seconds)
+$otp->maxAttempts; // 3
+$otp->code;        // null in production; the code itself in the sandbox, for testing
+
+// 2. Verify what the user typed
+$result = $notify->otp()->verify($otpId, $request->input('code'));
+
+if ($result->verified) {
+    // phone confirmed
+} elseif ($result->canRetry()) {
+    // wrong code - $result->attemptsLeft tries left
+} else {
+    // $result->errorCode: OtpVerifyResponse::EXPIRED, ::ATTEMPTS_EXCEEDED or ::ALREADY_VERIFIED -> ask for a new code
+}
+```
+
+- A wrong, expired or used-up code is returned as a result, not thrown. A malformed request still throws `ValidationException`, and an unknown `otp_id` throws `NotFoundException`.
+- A new code for the same recipient makes the previous one invalid.
+- Requesting a new code too soon throws `RateLimitException` with `errorCode` `OTP_RESEND_TOO_SOON` and `retryAfterSeconds`.
+- `send()` and `verify()` are **never retried automatically**: a retried send could deliver a second code, and a retried verify could count as two attempts.
+- `send()` needs the channel's send scope on your API client (e.g. `sms:send`).
+
 ## Checking message status
 
 ```php
@@ -140,10 +184,10 @@ Every failure the API reports is thrown as a typed exception, all extending `Clo
 | --- | --- |
 | `AuthenticationException` | Bad credentials, signature, or nonce (401, excluding an expired access token — that's refreshed transparently) |
 | `InsufficientBalanceException` | Not enough wallet balance to send (402) |
-| `ForbiddenException` | Revoked client, blocked company, disallowed IP, missing scope (403) |
-| `NotFoundException` | Unknown message/resource (404) |
+| `ForbiddenException` | Revoked client, a client switched off because it exceeds your plan's API key limit, blocked company, disallowed IP, missing scope (403) |
+| `NotFoundException` | Unknown message/resource/OTP (404) |
 | `ValidationException` | Invalid request fields (422) — carries `errors` (field → messages) when the server sent field-level detail |
-| `RateLimitException` | Too many requests (429) — carries `retryAfterSeconds` when the server sent one |
+| `RateLimitException` | Too many requests, or an OTP requested again too soon (429) — carries `retryAfterSeconds` when the server sent one |
 | `ServerException` | The API itself failed (5xx) — already retried a few times before this surfaces |
 | `NetworkException` | Couldn't reach the API at all (timeout, DNS, connection refused) |
 | `ApiException` | Any other non-2xx response |

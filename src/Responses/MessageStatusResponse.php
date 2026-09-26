@@ -23,6 +23,23 @@ final class MessageStatusResponse
     ) {}
 
     /**
+     * Free text that matches none of your templates is held until a Notify
+     * moderator approves it - send with a template to skip this.
+     */
+    public function isHeldForModeration(): bool
+    {
+        return $this->status === 'moderation';
+    }
+
+    /**
+     * A moderator refused the message; it was not sent and was refunded.
+     */
+    public function isRejected(): bool
+    {
+        return $this->status === 'rejected';
+    }
+
+    /**
      * @param  array<string, mixed>  $data
      */
     public static function fromArray(array $data): self
