@@ -20,6 +20,7 @@ class ChannelSender
 
     /**
      * @param  array<string, mixed>  $variables  values to substitute into a template's {{placeholders}} - ignored unless $templateId is given
+     * @param  string|null  $photoUrl  Telegram/WhatsApp only: a public JPEG/PNG URL sent with the message, the text becoming its caption (ignored on other channels)
      */
     public function send(
         string $to,
@@ -29,6 +30,7 @@ class ChannelSender
         ?string $smsType = null,
         ?string $subject = null,
         ?string $idempotencyKey = null,
+        ?string $photoUrl = null,
     ): SendMessageResponse {
         return $this->client->sendMessage(
             $this->channel,
@@ -39,6 +41,7 @@ class ChannelSender
             $smsType,
             $subject,
             $idempotencyKey,
+            $photoUrl,
         );
     }
 

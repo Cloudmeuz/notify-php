@@ -116,3 +116,16 @@ test('a 422 validation error carries the field-level errors through', function (
         expect($e->errors)->toBe(['to' => ['The to field is required.']]);
     }
 });
+
+test('a photo_url is sent along with a telegram message', function () {
+    $history = [];
+    $client = makeMockedClient([
+        jsonResponse(200, tokenResponseBody()),
+        jsonResponse(200, ['success' => true, 'message_id' => 'msg-1', 'status' => 'queued', 'price' => '10.00', 'currency' => 'UZS']),
+    ], $history);
+
+    $client->telegram()->send(to: '998901234567', message: '<b>Buyurtma tayyor</b>', photoUrl: 'https://example.com/order.jpg');
+
+    $body = json_decode((string) $history[1]['request']->getBody(), true);
+    expect($body)->toBe(['to' => '998901234567', 'message' => '<b>Buyurtma tayyor</b>', 'photo_url' => 'https://example.com/order.jpg']);
+});

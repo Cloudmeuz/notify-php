@@ -76,6 +76,24 @@ $notify->sms()->send(
 );
 ```
 
+### Photos and formatting (Telegram, WhatsApp)
+
+Pass a public JPEG/PNG URL as `photoUrl` - the message text becomes the photo's caption (text over 1024 characters follows as a separate message). Other channels ignore it.
+
+```php
+// Telegram renders HTML: <b>, <i>, <u>, <a href="...">
+$notify->telegram()->send(
+    to: '+998901234567',
+    message: "<b>Service started</b>\nModel: DAF XF106",
+    photoUrl: 'https://example.com/photos/truck-1855.jpg',
+);
+
+// WhatsApp does not render HTML - use *bold*, _italic_, ~strike~
+$notify->whatsapp()->send(to: '+998901234567', message: '*Service started*', photoUrl: 'https://example.com/photos/truck-1855.jpg');
+```
+
+With a WhatsApp template (`templateId`), `photoUrl` fills the template's IMAGE header, so the template must be approved by Meta with one.
+
 ### A channel not built into this SDK version yet
 
 ```php
@@ -156,6 +174,69 @@ if ($result->verified) {
 - Requesting a new code too soon throws `RateLimitException` with `errorCode` `OTP_RESEND_TOO_SOON` and `retryAfterSeconds`.
 - `send()` and `verify()` are **never retried automatically**: a retried send could deliver a second code, and a retried verify could count as two attempts.
 - `send()` needs the channel's send scope on your API client (e.g. `sms:send`).
+
+## Debt collection
+
+Hand a debt over and Notify reminds the debtor channel by channel following a collection strategy (e.g. Telegram on day 1 after the due date, SMS on day 2, then WhatsApp and a voice call) until you report it paid. Requires the `debts:manage` scope.
+
+```php
+$debt = $notify->debts()->create(
+    name: 'Aziz Karimov',
+    phone: '+998901234567',
+    amount: 1250000,
+    dueDate: '2026-10-15',          // or any DateTimeInterface
+    externalId: 'INV-1001',         // your own reference - makes create() idempotent
+    // strategyId: '...',           // dashboard -> Collection -> Strategies -> API ID; omit for your default strategy
+);
+
+$debt->id;               // keep it - every other call needs it
+$debt->status;           // "active"
+$debt->nextReminderAt;   // "2026-10-16T10:00:00+05:00"
+
+// When the debtor pays (partial payments are fine - reminders continue for the rest):
+$result = $notify->debts()->recordPayment($debt->id, 1250000, externalId: 'PAY-5001');
+
+$result->debt->isPaid();             // true -> no more reminders
+$result->payment->attributedChannel; // "sms" - the last delivered reminder before the payment
+$result->payment->daysLate;          // 2 (negative = paid early)
+
+$notify->debts()->find($debt->id)->payments; // DebtPaymentResponse[]
+$notify->debts()->cancel($debt->id);         // stop collecting
+```
+
+- `recordPayment()` throws `ValidationException` with `errorCode` `EXCEEDS_REMAINING` (more than is owed), `DEBT_CLOSED` (already paid or cancelled) or `INVALID_AMOUNT`.
+- `create()` and `recordPayment()` are retried automatically only when you pass `externalId` - without it a retry could create a duplicate.
+- Every reminder is a normal, billed message; its status events reach this API client's webhook.
+
+## Receiving webhooks
+
+Register a webhook per API client in the dashboard (API clients -> Webhook). Verify every request with the signing secret shown there:
+
+```php
+use CloudMe\Notify\Exceptions\InvalidWebhookSignatureException;
+use CloudMe\Notify\Webhooks\WebhookVerifier;
+
+$verifier = new WebhookVerifier(getenv('NOTIFY_WEBHOOK_SECRET'));
+
+try {
+    // Always the RAW body - never a re-encoded array.
+    $event = $verifier->parse(file_get_contents('php://input'), getallheaders());
+} catch (InvalidWebhookSignatureException) {
+    http_response_code(401);
+    exit;
+}
+
+// A retried delivery carries the same $event->id - skip ones you already handled.
+match ($event->event) {
+    'message.delivered' => markDelivered($event->messageId),
+    'message.failed' => markFailed($event->messageId, $event->errorCode),
+    default => null, // message.sent, message.rejected, webhook.test
+};
+
+http_response_code(200); // respond 2xx within 5 seconds
+```
+
+`X-Signature` is the hex HMAC-SHA256 of `"{X-Webhook-Timestamp}.{raw body}"`; `parse()` also rejects timestamps older than 5 minutes (replay protection - adjust with `new WebhookVerifier($secret, toleranceSeconds: ...)`).
 
 ## Checking message status
 

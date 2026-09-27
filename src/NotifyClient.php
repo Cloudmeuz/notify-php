@@ -10,6 +10,7 @@ use CloudMe\Notify\Auth\TokenManager;
 use CloudMe\Notify\Auth\TokenStorage;
 use CloudMe\Notify\Channels\ChannelSender;
 use CloudMe\Notify\Channels\PushChannelSender;
+use CloudMe\Notify\Debts\DebtsClient;
 use CloudMe\Notify\Exceptions\AuthenticationException;
 use CloudMe\Notify\Exceptions\ConfigurationException;
 use CloudMe\Notify\Exceptions\ValidationException;
@@ -39,6 +40,9 @@ use GuzzleHttp\Client as GuzzleClient;
  *
  * $otp = $notify->otp()->send(to: '+998901234567');
  * $notify->otp()->verify($otp->otpId, '481201')->verified;
+ *
+ * $debt = $notify->debts()->create(name: 'Aziz', phone: '998901234567', amount: 1250000, dueDate: '2026-10-15', externalId: 'INV-1001');
+ * $notify->debts()->recordPayment($debt->id, 1250000, externalId: 'PAY-5001');
  * ```
  *
  * Authentication, token refresh, request signing, nonce/timestamp
@@ -162,6 +166,22 @@ final class NotifyClient
         return new OtpClient($this);
     }
 
+    public function debts(): DebtsClient
+    {
+        return new DebtsClient($this);
+    }
+
+    /**
+     * @internal called by DebtsClient - use `$notify->debts()->...` instead
+     *
+     * @param  array<string, mixed>  $json
+     * @return array<string, mixed>
+     */
+    public function debtRequest(string $method, string $path, array $json = [], bool $retryable = false): array
+    {
+        return $this->authenticatedRequest($method, $path, json: $json, retryable: $retryable);
+    }
+
     /**
      * @internal called by ChannelSender - use `$notify->sms()->send(...)` etc. instead
      *
@@ -176,6 +196,7 @@ final class NotifyClient
         ?string $smsType,
         ?string $subject,
         ?string $idempotencyKey,
+        ?string $photoUrl = null,
     ): SendMessageResponse {
         $body = array_filter([
             'to' => $to,
@@ -184,6 +205,7 @@ final class NotifyClient
             'variables' => $variables === [] ? null : $variables,
             'sms_type' => $smsType,
             'subject' => $subject,
+            'photo_url' => $photoUrl,
         ], static fn ($value) => $value !== null);
 
         // A send the caller didn't tag with their own Idempotency-Key still
