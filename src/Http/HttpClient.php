@@ -13,6 +13,7 @@ use CloudMe\Notify\Exceptions\NotFoundException;
 use CloudMe\Notify\Exceptions\NotifyException;
 use CloudMe\Notify\Exceptions\RateLimitException;
 use CloudMe\Notify\Exceptions\ServerException;
+use CloudMe\Notify\Exceptions\SpendingLimitExceededException;
 use CloudMe\Notify\Exceptions\ValidationException;
 use GuzzleHttp\ClientInterface;
 use GuzzleHttp\Exception\ConnectException;
@@ -131,6 +132,7 @@ final class HttpClient
 
         return match (true) {
             $status === 401 => new AuthenticationException($message, $errorCode, $status, $decoded, $previous),
+            $status === 402 && $errorCode === 'SPENDING_LIMIT_EXCEEDED' => new SpendingLimitExceededException($message, $errorCode, $status, $decoded, $previous),
             $status === 402 => new InsufficientBalanceException($message, $errorCode, $status, $decoded, $previous),
             $status === 403 => new ForbiddenException($message, $errorCode, $status, $decoded, $previous),
             $status === 404 => new NotFoundException($message, $errorCode, $status, $decoded, $previous),

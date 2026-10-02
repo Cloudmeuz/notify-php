@@ -94,11 +94,37 @@ $notify->whatsapp()->send(to: '+998901234567', message: '*Service started*', pho
 
 With a WhatsApp template (`templateId`), `photoUrl` fills the template's IMAGE header, so the template must be approved by Meta with one.
 
-### A channel not built into this SDK version yet
+### A channel chosen at runtime, or not built into this SDK version yet
 
 ```php
 $notify->channel('sms')->send(to: '+998901234567', message: 'Salom!'); // same as ->sms()
+$notify->channel('rcs')->send(to: '+998901234567', message: 'Salom!'); // unknown here: goes through the universal POST /messages
 ```
+
+### Listing templates
+
+```php
+foreach ($notify->templates()->list('sms') as $template) {
+    $template->id;        // pass as templateId
+    $template->variables; // ['name', 'order_id'] - send a value for each
+}
+```
+
+System templates plus your company's approved ones, for the channels your API client has a `{channel}:send` scope for.
+
+### Telegram: binding a phone first
+
+Telegram cannot message a phone number until its owner has opened your bot once. Send them the link first:
+
+```php
+$binding = $notify->telegram()->bindingLink('+998901234567');
+
+if (! $binding->bound) {
+    $notify->sms()->send(to: '+998901234567', message: "Telegram orqali xabar olish uchun: {$binding->link}");
+}
+```
+
+The same phone gets the same link again for 7 days. Pass `channelAccountId:` for one of your own bots.
 
 ### Registering a push device
 
@@ -236,6 +262,8 @@ match ($event->event) {
 http_response_code(200); // respond 2xx within 5 seconds
 ```
 
+`$event->occurredAt()` returns the payload `timestamp` as a `DateTimeImmutable` (when that delivery was built - an automatic retry builds it again).
+
 `X-Signature` is the hex HMAC-SHA256 of `"{X-Webhook-Timestamp}.{raw body}"`; `parse()` also rejects timestamps older than 5 minutes (replay protection - adjust with `new WebhookVerifier($secret, toleranceSeconds: ...)`).
 
 ## Checking message status
@@ -287,6 +315,8 @@ try {
 }
 ```
 
+Every documented error code also comes with a suggested fix and a link to it in the dashboard API docs: `$e->hint()` and `$e->docsUrl()` (both `null` for undocumented codes). `getMessage()` and `hint()` are in the language set with the client's `locale` option (`uz`, `uz-Cyrl`, `ru`, `en`; Uzbek when not set) - the SDK sends it as `Accept-Language` on every request. A missing scope is in `$e->requiredScope()` (`SCOPE_FORBIDDEN`), missing template variables in `$e->missingVariables()` (`MISSING_TEMPLATE_VARIABLE`).
+
 ## Configuration
 
 ```php
@@ -301,6 +331,7 @@ $notify = new NotifyClient(
         'connect_timeout' => 5,   // seconds, default 5
         'max_retries' => 3,       // default 3
     ],
+    locale: 'ru', // optional - language of error messages and hints: uz (default), uz-Cyrl, ru, en
 );
 ```
 
@@ -329,3 +360,21 @@ vendor/bin/pest
 ## License
 
 MIT
+
+
+### Company spending limits
+
+`INSUFFICIENT_BALANCE`: insufficient wallet funds. `SPENDING_LIMIT_EXCEEDED`: a company daily or monthly message spending cap would be exceeded (HTTP 402). Sandbox is exempt. Gross message debits count toward calendar limits; refunds do not reset the allowance. Change limits in the company balance panel or wait for the next period.
+The updated PHP SDK exposes `CloudMe\Notify\Exceptions\SpendingLimitExceededException`, a subclass of `InsufficientBalanceException`. Existing integrations can inspect `$exception->errorCode === "SPENDING_LIMIT_EXCEEDED"`; the Laravel facade preserves this code. These 402 errors are not retried automatically.
+
+## Sender profiles (since 1.3)
+
+Choose the company Telegram bot or Firebase project by its Channels profile ID. Omit the ID to use the current default. Register FCM tokens with the same project ID used for sending (one token per company/project/phone). Each Telegram bot needs its own recipient binding.
+
+```php
+$notify->telegram()->send(to: "998901234567", message: "Hello", channelAccountId: 7);
+$notify->push()->registerDevice("998901234567", $fcmToken, channelAccountId: 12);
+$notify->push()->send(to: "998901234567", message: "Hello", channelAccountId: 12);
+```
+
+Responses expose `channelAccountId` (nullable). Requires the API with channel-account support.

@@ -82,7 +82,7 @@ function tokenResponseBody(string $accessToken = 'access-token-1', int $expiresI
  * @param  array<int, array<string, mixed>>  $history  passed by reference, populated as calls happen
  * @param  array<string, mixed>  $options  forwarded to NotifyClient (e.g. ['max_retries' => 2])
  */
-function makeMockedClient(array $responses, array &$history = [], array $options = []): NotifyClient
+function makeMockedClient(array $responses, array &$history = [], array $options = [], ?string $locale = null): NotifyClient
 {
     [$privateKey] = generateTestRsaKeyPair();
 
@@ -96,5 +96,6 @@ function makeMockedClient(array $responses, array &$history = [], array $options
         privateKey: $privateKey,
         baseUrl: 'https://notify.test/api/v1',
         options: array_merge(['handler' => $stack, 'max_retries' => 2], $options),
+        locale: $locale,
     );
 }

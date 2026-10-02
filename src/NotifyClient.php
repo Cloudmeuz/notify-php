@@ -10,6 +10,7 @@ use CloudMe\Notify\Auth\TokenManager;
 use CloudMe\Notify\Auth\TokenStorage;
 use CloudMe\Notify\Channels\ChannelSender;
 use CloudMe\Notify\Channels\PushChannelSender;
+use CloudMe\Notify\Channels\TelegramChannelSender;
 use CloudMe\Notify\Debts\DebtsClient;
 use CloudMe\Notify\Exceptions\AuthenticationException;
 use CloudMe\Notify\Exceptions\ConfigurationException;
@@ -22,6 +23,9 @@ use CloudMe\Notify\Responses\MessageStatusResponse;
 use CloudMe\Notify\Responses\OtpSendResponse;
 use CloudMe\Notify\Responses\OtpVerifyResponse;
 use CloudMe\Notify\Responses\SendMessageResponse;
+use CloudMe\Notify\Responses\TelegramBindingResponse;
+use CloudMe\Notify\Responses\TemplateResponse;
+use CloudMe\Notify\Templates\TemplatesClient;
 use DateTimeInterface;
 use GuzzleHttp\Client as GuzzleClient;
 
@@ -57,6 +61,9 @@ final class NotifyClient
 
     private const DEFAULT_MAX_RETRIES = 3;
 
+    /** Channels with their own /messages/{channel} endpoint. */
+    private const NAMED_CHANNELS = ['sms', 'telegram', 'whatsapp', 'voice', 'email', 'push'];
+
     private readonly HttpClient $http;
 
     private readonly TokenManager $tokens;
@@ -65,6 +72,7 @@ final class NotifyClient
      * @param  string  $privateKey  a PEM-encoded RSA private key, or a filesystem path to one
      * @param  string  $baseUrl  your Notify API base URL, e.g. "https://notify.example.com/api/v1" - never guessed/defaulted, since every deployment's domain differs
      * @param  array{timeout?: float, connect_timeout?: float, max_retries?: int, handler?: mixed}  $options  `handler` overrides the Guzzle handler stack - intended for tests (e.g. Guzzle's MockHandler), not normal use
+     * @param  string|null  $locale  language of error messages and hints, sent as Accept-Language on every request: "uz", "uz-Cyrl", "ru" or "en" (the API answers in Uzbek when omitted)
      */
     public function __construct(
         string $clientId,
@@ -73,6 +81,7 @@ final class NotifyClient
         string $baseUrl,
         ?TokenStorage $tokenStorage = null,
         array $options = [],
+        ?string $locale = null,
     ) {
         if (trim($clientId) === '' || trim($apiKey) === '') {
             throw new ConfigurationException('clientId and apiKey are required.');
@@ -93,6 +102,10 @@ final class NotifyClient
             $guzzleConfig['handler'] = $options['handler'];
         }
 
+        if ($locale !== null && trim($locale) !== '') {
+            $guzzleConfig['headers'] = ['Accept-Language' => trim($locale)];
+        }
+
         $guzzle = new GuzzleClient($guzzleConfig);
 
         $this->http = new HttpClient($guzzle, $options['max_retries'] ?? self::DEFAULT_MAX_RETRIES);
@@ -110,9 +123,9 @@ final class NotifyClient
         return new ChannelSender($this, 'sms');
     }
 
-    public function telegram(): ChannelSender
+    public function telegram(): TelegramChannelSender
     {
-        return new ChannelSender($this, 'telegram');
+        return new TelegramChannelSender($this, 'telegram');
     }
 
     public function whatsapp(): ChannelSender
@@ -136,12 +149,16 @@ final class NotifyClient
     }
 
     /**
-     * Escape hatch for a channel this SDK version doesn't have a named
-     * method for yet - routes through the universal /messages endpoint.
+     * A channel chosen at runtime. Channels this SDK version knows use their
+     * own /messages/{channel} endpoint, exactly like sms(), telegram() etc.;
+     * any other channel goes through the universal POST /messages endpoint,
+     * so a channel added to the API later works without an SDK upgrade.
      */
     public function channel(string $channel): ChannelSender
     {
-        return new ChannelSender($this, $channel);
+        return in_array($channel, self::NAMED_CHANNELS, true)
+            ? new ChannelSender($this, $channel)
+            : new ChannelSender($this, $channel, universal: true);
     }
 
     public function message(string $messageId): MessageStatusResponse
@@ -159,6 +176,11 @@ final class NotifyClient
     public function reports(): ReportsClient
     {
         return new ReportsClient($this);
+    }
+
+    public function templates(): TemplatesClient
+    {
+        return new TemplatesClient($this);
     }
 
     public function otp(): OtpClient
@@ -197,15 +219,20 @@ final class NotifyClient
         ?string $subject,
         ?string $idempotencyKey,
         ?string $photoUrl = null,
+        ?int $channelAccountId = null,
+        bool $universal = false,
     ): SendMessageResponse {
         $body = array_filter([
-            'to' => $to,
+            // The universal endpoint takes the channel in the body and calls
+            // the recipient "recipient"; the per-channel endpoints call it "to".
+            ...($universal ? ['channel' => $channel, 'recipient' => $to] : ['to' => $to]),
             'message' => $message,
             'template_id' => $templateId,
             'variables' => $variables === [] ? null : $variables,
             'sms_type' => $smsType,
             'subject' => $subject,
             'photo_url' => $photoUrl,
+            'channel_account_id' => $channelAccountId,
         ], static fn ($value) => $value !== null);
 
         // A send the caller didn't tag with their own Idempotency-Key still
@@ -216,7 +243,7 @@ final class NotifyClient
 
         $response = $this->authenticatedRequest(
             'POST',
-            "messages/{$channel}",
+            $universal ? 'messages' : "messages/{$channel}",
             json: $body,
             idempotencyKey: $idempotencyKey,
             retryable: true,
@@ -228,12 +255,13 @@ final class NotifyClient
     /**
      * @internal called by PushChannelSender - use `$notify->push()->registerDevice(...)` instead
      */
-    public function registerPushDevice(string $phone, string $fcmToken): void
+    public function registerPushDevice(string $phone, string $fcmToken, ?int $channelAccountId = null): void
     {
-        $this->authenticatedRequest('POST', 'push/devices', json: [
+        $this->authenticatedRequest('POST', 'push/devices', json: array_filter([
             'phone' => $phone,
             'fcm_token' => $fcmToken,
-        ], retryable: true);
+            'channel_account_id' => $channelAccountId,
+        ], static fn ($value) => $value !== null), retryable: true);
     }
 
     /**
@@ -274,6 +302,32 @@ final class NotifyClient
         }
 
         return OtpVerifyResponse::fromArray($response);
+    }
+
+    /**
+     * @internal called by TemplatesClient - use `$notify->templates()->list()` instead
+     *
+     * @return list<TemplateResponse>
+     */
+    public function listTemplates(?string $channel): array
+    {
+        $response = $this->authenticatedRequest('GET', 'templates', query: array_filter(['channel' => $channel], static fn ($value) => $value !== null), retryable: true);
+
+        return array_map(static fn (array $template) => TemplateResponse::fromArray($template), array_values($response['templates'] ?? []));
+    }
+
+    /**
+     * @internal called by TelegramChannelSender - use `$notify->telegram()->bindingLink(...)` instead
+     */
+    public function createTelegramBinding(string $phone, ?int $channelAccountId = null): TelegramBindingResponse
+    {
+        // Safe to retry: the API returns the same pending link for the same phone.
+        $response = $this->authenticatedRequest('POST', 'telegram/bindings', json: array_filter([
+            'phone' => $phone,
+            'channel_account_id' => $channelAccountId,
+        ], static fn ($value) => $value !== null), retryable: true);
+
+        return TelegramBindingResponse::fromArray($response);
     }
 
     /**

@@ -12,8 +12,8 @@ final class PushChannelSender extends ChannelSender
      * mobile app obtains or rotates a token for a logged-in user, before
      * sending them a push notification with send().
      */
-    public function registerDevice(string $phone, string $fcmToken): void
+    public function registerDevice(string $phone, string $fcmToken, ?int $channelAccountId = null): void
     {
-        $this->client->registerPushDevice($phone, $fcmToken);
+        $this->client->registerPushDevice($phone, $fcmToken, $channelAccountId);
     }
 }

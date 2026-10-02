@@ -48,6 +48,7 @@ test('a correctly signed webhook is parsed into an event', function () {
     expect($event->errorCode)->toBe('CHAT_NOT_BOUND');
     expect($event->signedAt)->toBe(WEBHOOK_NOW);
     expect($event->isTest())->toBeFalse();
+    expect($event->occurredAt()?->format(DATE_ATOM))->toBe('2026-10-02T10:00:00+05:00');
 });
 
 test('header names are matched case-insensitively and may be arrays', function () {

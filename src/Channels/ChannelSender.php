@@ -13,9 +13,13 @@ use CloudMe\Notify\Responses\SendMessageResponse;
  */
 class ChannelSender
 {
+    /**
+     * @param  bool  $universal  send through the universal POST /messages endpoint (channel in the body) instead of /messages/{channel}
+     */
     public function __construct(
         protected readonly NotifyClient $client,
         protected readonly string $channel,
+        protected readonly bool $universal = false,
     ) {}
 
     /**
@@ -31,6 +35,7 @@ class ChannelSender
         ?string $subject = null,
         ?string $idempotencyKey = null,
         ?string $photoUrl = null,
+        ?int $channelAccountId = null,
     ): SendMessageResponse {
         return $this->client->sendMessage(
             $this->channel,
@@ -42,6 +47,8 @@ class ChannelSender
             $subject,
             $idempotencyKey,
             $photoUrl,
+            $channelAccountId,
+            $this->universal,
         );
     }
 

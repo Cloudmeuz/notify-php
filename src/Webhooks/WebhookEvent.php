@@ -4,6 +4,9 @@ declare(strict_types=1);
 
 namespace CloudMe\Notify\Webhooks;
 
+use DateTimeImmutable;
+use Exception;
+
 final class WebhookEvent
 {
     /**
@@ -30,6 +33,27 @@ final class WebhookEvent
     public function isTest(): bool
     {
         return $this->event === 'webhook.test';
+    }
+
+    /**
+     * The payload's ISO-8601 `timestamp`: when Notify built this delivery.
+     * An automatic retry builds it again; a manual re-send from the
+     * dashboard keeps the original. Use the message status, not this, to
+     * order events.
+     */
+    public function occurredAt(): ?DateTimeImmutable
+    {
+        $timestamp = $this->payload['timestamp'] ?? null;
+
+        if (! is_string($timestamp) || $timestamp === '') {
+            return null;
+        }
+
+        try {
+            return new DateTimeImmutable($timestamp);
+        } catch (Exception) {
+            return null;
+        }
     }
 
     /**

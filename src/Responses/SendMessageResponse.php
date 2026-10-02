@@ -14,6 +14,7 @@ final class SendMessageResponse
         public readonly ?string $balance,
         /** "production" or "sandbox" - confirms which one actually handled this send. */
         public readonly string $environment = 'production',
+        public readonly ?int $channelAccountId = null,
     ) {}
 
     /**
@@ -45,6 +46,7 @@ final class SendMessageResponse
             currency: (string) $data['currency'],
             balance: isset($data['balance']) ? (string) $data['balance'] : null,
             environment: (string) ($data['environment'] ?? 'production'),
+            channelAccountId: isset($data['channel_account_id']) ? (int) $data['channel_account_id'] : null,
         );
     }
 }

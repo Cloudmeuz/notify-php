@@ -1,8 +1,26 @@
 <?php
 
 use CloudMe\Notify\Exceptions\InsufficientBalanceException;
+use CloudMe\Notify\Exceptions\SpendingLimitExceededException;
 use CloudMe\Notify\Exceptions\ValidationException;
 use CloudMe\Notify\Responses\SendMessageResponse;
+
+test('a spending cap maps to a specific exception without retrying the request', function () {
+    $history = [];
+    $client = makeMockedClient([
+        jsonResponse(200, tokenResponseBody()),
+        jsonResponse(402, ['success' => false, 'error' => ['code' => 'SPENDING_LIMIT_EXCEEDED', 'message' => 'Daily spending limit exceeded.']]),
+    ], $history);
+
+    try {
+        $client->sms()->send(to: '998901234567', message: 'hi');
+        $this->fail('Expected SpendingLimitExceededException.');
+    } catch (SpendingLimitExceededException $exception) {
+        expect($exception->errorCode)->toBe('SPENDING_LIMIT_EXCEEDED');
+        expect($exception->statusCode)->toBe(402);
+    }
+    expect($history)->toHaveCount(2);
+});
 
 test('sms()->send() posts to messages/sms with the given fields and maps the response', function () {
     $history = [];
@@ -63,7 +81,20 @@ test('sending with a template omits the message field and includes template_id/v
     expect($body)->toBe(['to' => '998901234567', 'template_id' => 42, 'variables' => ['order_id' => 'A-12891']]);
 });
 
-test('the universal channel() escape hatch posts to messages/{channel}', function () {
+test('channel() with a channel unknown to this SDK posts to the universal endpoint', function () {
+    $history = [];
+    $client = makeMockedClient([
+        jsonResponse(200, tokenResponseBody()),
+        jsonResponse(200, ['success' => true, 'message_id' => 'msg-1', 'status' => 'queued', 'price' => '10.00', 'currency' => 'UZS']),
+    ], $history);
+
+    $client->channel('rcs')->send(to: '998901234567', message: 'Salom');
+
+    expect((string) $history[1]['request']->getUri())->toEndWith('/messages');
+    expect(json_decode((string) $history[1]['request']->getBody(), true))->toBe(['channel' => 'rcs', 'recipient' => '998901234567', 'message' => 'Salom']);
+});
+
+test('channel() with a known channel posts to messages/{channel}', function () {
     $history = [];
     $client = makeMockedClient([
         jsonResponse(200, tokenResponseBody()),

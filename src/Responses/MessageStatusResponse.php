@@ -20,6 +20,7 @@ final class MessageStatusResponse
         public readonly ?string $deliveredAt,
         /** "production" or "sandbox". */
         public readonly string $environment = 'production',
+        public readonly ?int $channelAccountId = null,
     ) {}
 
     /**
@@ -57,6 +58,7 @@ final class MessageStatusResponse
             sentAt: $data['sent_at'] ?? null,
             deliveredAt: $data['delivered_at'] ?? null,
             environment: (string) ($data['environment'] ?? 'production'),
+            channelAccountId: isset($data['channel_account_id']) ? (int) $data['channel_account_id'] : null,
         );
     }
 }
