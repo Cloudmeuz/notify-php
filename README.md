@@ -234,6 +234,57 @@ $notify->debts()->cancel($debt->id);         // stop collecting
 - `create()` and `recordPayment()` are retried automatically only when you pass `externalId` - without it a retry could create a duplicate.
 - Every reminder is a normal, billed message; its status events reach this API client's webhook.
 
+## Scheduled messages (since 1.4)
+
+Send a message later - once, or on a recurring timetable - and edit, pause, resume or cancel it. These are the same schedules as the dashboard's Scheduled messages page. Requires the `schedules:manage` scope plus the channel's send scope (e.g. `sms:send`).
+
+```php
+use CloudMe\Notify\ScheduledMessages\Recurrence;
+
+// Once, at a given time
+$schedule = $notify->scheduledMessages()->create(
+    channel: 'sms',
+    startsAt: new DateTimeImmutable('2026-10-06 10:00', new DateTimeZone('Asia/Tashkent')), // or an ISO 8601 string
+    recipient: '+998901234567',
+    message: 'Eslatma: bugun soat 15:00 da uchrashuv',
+);
+
+$schedule->id;          // keep it - every other call needs it
+$schedule->nextRunAt;   // "2026-10-06T10:00:00+05:00"
+
+// Recurring - weekly/monthly sends use the time of day of startsAt
+$notify->scheduledMessages()->create(
+    channel: 'telegram',
+    startsAt: '2026-10-05T09:00:00+05:00',
+    contactGroupId: 12,                       // dashboard -> Contacts -> Groups -> API ID (production only)
+    message: 'Salom, {{name}}! Haftalik yangiliklar...',
+    recurrence: Recurrence::weekly([1, 4]),   // Monday and Thursday
+);
+
+Recurrence::every(2, 'hours');   // every 2 hours
+Recurrence::every(1, 'days');    // daily
+Recurrence::monthly([1, 15]);    // 1st and 15th of each month
+
+// A template instead of a plain message (single recipient only)
+$notify->scheduledMessages()->create(channel: 'sms', startsAt: '2026-10-06T10:00:00+05:00', recipient: '+998901234567',
+    templateId: 42, variables: ['name' => 'Aziz']);
+
+// Change it - update() replaces the whole schedule, so pass everything again
+$notify->scheduledMessages()->update($schedule->id, channel: 'sms', startsAt: '2026-10-07T10:00:00+05:00',
+    recipient: '+998901234567', message: 'Uchrashuv ertaga');
+
+$notify->scheduledMessages()->pause($schedule->id);
+$notify->scheduledMessages()->resume($schedule->id);   // continues at the next occurrence; missed ones are skipped
+$notify->scheduledMessages()->cancel($schedule->id);
+
+$notify->scheduledMessages()->find($schedule->id)->lastError;           // why the last send failed, if it did
+$page = $notify->scheduledMessages()->list(status: 'active', perPage: 50); // ->items, ->total, ->hasMorePages()
+```
+
+- Errors throw `ValidationException` with `errorCode` `SCHEDULE_STATE_INVALID` (e.g. pausing a paused schedule, changing a completed/cancelled one), `SCHEDULE_START_PASSED` (resuming a one-time schedule whose time has passed - `update()` it instead), `TEMPLATE_NOT_FOUND`, `CONTACT_GROUP_NOT_FOUND` or `SANDBOX_GROUP_UNSUPPORTED`.
+- `create()`, `pause()`, `resume()` and `cancel()` are not retried automatically; `update()`, `find()` and `list()` are.
+- Each send is a normal, billed message (free in sandbox); its status events reach this API client's webhook. A failed send (e.g. insufficient balance) is recorded in `lastError` and the schedule moves on to its next occurrence.
+
 ## Receiving webhooks
 
 Register a webhook per API client in the dashboard (API clients -> Webhook). Verify every request with the signing secret shown there:

@@ -25,6 +25,7 @@ use CloudMe\Notify\Responses\OtpVerifyResponse;
 use CloudMe\Notify\Responses\SendMessageResponse;
 use CloudMe\Notify\Responses\TelegramBindingResponse;
 use CloudMe\Notify\Responses\TemplateResponse;
+use CloudMe\Notify\ScheduledMessages\ScheduledMessagesClient;
 use CloudMe\Notify\Templates\TemplatesClient;
 use DateTimeInterface;
 use GuzzleHttp\Client as GuzzleClient;
@@ -47,6 +48,8 @@ use GuzzleHttp\Client as GuzzleClient;
  *
  * $debt = $notify->debts()->create(name: 'Aziz', phone: '998901234567', amount: 1250000, dueDate: '2026-10-15', externalId: 'INV-1001');
  * $notify->debts()->recordPayment($debt->id, 1250000, externalId: 'PAY-5001');
+ *
+ * $notify->scheduledMessages()->create(channel: 'sms', startsAt: '2026-10-06T10:00:00+05:00', recipient: '+998901234567', message: 'Eslatma');
  * ```
  *
  * Authentication, token refresh, request signing, nonce/timestamp
@@ -191,6 +194,23 @@ final class NotifyClient
     public function debts(): DebtsClient
     {
         return new DebtsClient($this);
+    }
+
+    public function scheduledMessages(): ScheduledMessagesClient
+    {
+        return new ScheduledMessagesClient($this);
+    }
+
+    /**
+     * @internal called by ScheduledMessagesClient - use `$notify->scheduledMessages()->...` instead
+     *
+     * @param  array<string, mixed>  $json
+     * @param  array<string, mixed>  $query
+     * @return array<string, mixed>
+     */
+    public function scheduledMessageRequest(string $method, string $path, array $json = [], array $query = [], bool $retryable = false): array
+    {
+        return $this->authenticatedRequest($method, $path, json: $json, query: $query, retryable: $retryable);
     }
 
     /**
